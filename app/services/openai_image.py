@@ -58,18 +58,30 @@ class OpenAIImageService:
         quality: str,
         input_fidelity: str,
     ) -> bytes:
-        """Текст + референс(ы) → одно изображение (PNG-байты)."""
+        """Текст + референс(ы) → одно изображение (PNG-байты).
+
+        ``input_fidelity`` поддерживают не все модели (например, gpt-image-2 — нет).
+        Если API его отвергает, повторяем запрос без этого параметра.
+        """
         files = [("reference.png", data, "image/png") for data in images]
+        kwargs: dict = {
+            "model": model,
+            "prompt": prompt,
+            "image": files if len(files) > 1 else files[0],
+            "size": size,
+            "quality": quality,
+            "n": 1,
+        }
         try:
-            result = await self._client.images.edit(
-                model=model,
-                prompt=prompt,
-                image=files if len(files) > 1 else files[0],
-                size=size,
-                quality=quality,
-                input_fidelity=input_fidelity,
-                n=1,
-            )
+            try:
+                result = await self._client.images.edit(
+                    **kwargs, input_fidelity=input_fidelity
+                )
+            except OpenAIError as exc:
+                if "input_fidelity" not in str(exc).lower():
+                    raise
+                logger.info("Модель %s не поддерживает input_fidelity — повтор без него", model)
+                result = await self._client.images.edit(**kwargs)
         except OpenAIError as exc:
             logger.warning("OpenAI image edit failed: %s", exc)
             raise ImageGenerationError(_human_error(exc)) from exc
