@@ -202,6 +202,10 @@ The image runs as a non-root user and writes its database to a mounted `/data` v
 
 - The top image models on some OpenAI accounts require **organization verification**. If the API
   returns an access error, set `OPENAI_MODEL=gpt-image-1-mini` in `.env`.
+- **Reference fidelity** (`input_fidelity`) is only honored by some models — `gpt-image-1` supports
+  it, while `gpt-image-2` does not. The bot sends the parameter and transparently retries without it
+  when the model rejects it, so the setting never breaks a request; it simply has no effect on models
+  that ignore it.
 - Results are sent as Telegram photos (Telegram applies light preview compression).
 - If `OWNER_IDS` is left empty, the bot logs a warning and serves **everyone** — set your ID to lock it down.
 
