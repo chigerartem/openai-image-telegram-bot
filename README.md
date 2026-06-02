@@ -19,9 +19,8 @@ per-user settings, a whitelist access layer, and a SQLite generation history.
 
 ## Demo
 
-<!-- Placeholder mockup. Replace with a real screenshot/GIF: drop an image at docs/demo.png and update the src. -->
 <p align="center">
-  <img src="docs/demo.svg" alt="Bot demo: a text prompt turns into a generated image" width="320">
+  <img src="docs/demo.png" alt="Bot demo: a reference photo of a cat is turned into a cosmonaut cat on the Moon" width="300">
 </p>
 
 ```
