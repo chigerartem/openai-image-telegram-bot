@@ -2,10 +2,10 @@
 
 > Send a text prompt to a Telegram chat — get an AI-generated image back, in seconds.
 
-A small, production-minded Telegram bot that turns text descriptions into images via the
-**OpenAI Images API** (`gpt-image-2` by default). Built with `aiogram 3`, fully async, with a
-whitelist access layer, a SQLite generation history, and zero hard-coded settings — everything
-is driven by environment variables.
+A small, production-minded Telegram bot that turns text descriptions — or a text prompt plus a
+**reference photo** — into images via the **OpenAI Images API** (`gpt-image-2` by default). Built
+with `aiogram 3`, fully async, with an inline `/settings` menu for format / quality / model,
+per-user settings, a whitelist access layer, and a SQLite generation history.
 
 [![CI](https://github.com/chigerartem/openai-image-telegram-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/chigerartem/openai-image-telegram-bot/actions/workflows/ci.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
@@ -34,13 +34,32 @@ Bot:  [image]  a cosmonaut cat on the Moon, digital illustration, soft light
 
 ## Features
 
-- **Text → image in one message.** No commands, no menus — just describe what you want.
-- **Configurable without touching code.** Model, size and quality are read from `.env`.
+- **Text → image in one message.** Just describe what you want.
+- **Reference images (image-to-image).** Attach a photo with a caption and the bot uses it as a
+  reference via the OpenAI `images.edit` endpoint — the part the plain `generate` call can't do.
+- **Format control.** Pick `1:1`, `3:2`, `2:3`, `16:9`, `9:16`, `Auto`, or type a **custom resolution**
+  like `1920×1080`. Widescreen and custom sizes are produced by generating the nearest native size
+  and cropping/fitting with Pillow.
+- **Inline settings menu (`/settings`).** Buttons to switch aspect ratio, quality, model, and
+  reference fidelity — no need to touch `.env` or restart.
+- **Per-user settings** persisted in SQLite — every user keeps their own format/quality/model.
 - **Whitelist access control.** Restrict the bot to specific Telegram IDs (or open it to everyone).
 - **Generation history in SQLite.** Every attempt — success or failure — is recorded with a versioned migration runner.
 - **Human-readable error handling.** Moderation rejections, quota limits and model-access errors are translated into clear messages.
 - **Fully async** end to end (`aiogram` + `AsyncOpenAI` + `aiosqlite`).
 - **Container-ready.** Ships with a slim, non-root `Dockerfile`.
+
+## Usage
+
+| You send | The bot does |
+|----------|--------------|
+| A text description | Generates an image from the prompt (`images.generate`) |
+| A photo **with a caption** | Uses the photo as a reference and the caption as the instruction (`images.edit`) |
+| `/settings` | Opens an inline menu: format · quality · model · reference fidelity |
+
+Formats map to the API like this: `1:1 / 3:2 / 2:3` are native sizes (lossless); `16:9` and `9:16`
+are center-cropped from the nearest native size; a custom `W×H` is generated at the nearest native
+size and then cover-cropped + resized to the exact pixels.
 
 ---
 
@@ -72,31 +91,39 @@ Bot:  [image]  a cosmonaut cat on the Moon, digital illustration, soft light
 
 The flow of a single request:
 
-1. A non-command text message hits `handlers/generate.py`.
+1. A text prompt (or a photo + caption) hits `handlers/generate.py`.
 2. `AccessMiddleware` has already verified the sender is allowed (or the whitelist is empty).
-3. The user is upserted into `users`; a "Generating…" status message is sent.
-4. `OpenAIImageService.generate()` calls the Images API and returns raw PNG bytes.
-5. The image is sent back as a photo; the attempt is logged to `image_generations`.
+3. The user is upserted; their per-user settings are loaded and turned into a **render plan**
+   (`presets.plan_render` → API size + optional crop/fit).
+4. `OpenAIImageService.generate()` (text) or `.edit()` (with the reference photo) calls the Images
+   API and returns raw PNG bytes.
+5. `image_processing` applies the crop/fit for `16:9`, `9:16` or a custom resolution (off the event
+   loop via `asyncio.to_thread`).
+6. The image is sent back as a photo; the attempt is logged to `image_generations`.
 
 ### Project layout
 
 ```
 app/
-├── main.py              # entry point — builds and runs the bot (long polling)
-├── config.py            # frozen Config dataclass loaded from .env
+├── main.py                  # entry point — builds and runs the bot (long polling)
+├── config.py                # frozen Config dataclass loaded from .env
+├── presets.py               # formats/quality/model tables + render planning
+├── keyboards.py             # inline menus for /settings
 ├── handlers/
-│   ├── commands.py      # /start, /help
-│   └── generate.py      # prompt → image → reply
+│   ├── commands.py          # /start, /help
+│   ├── settings.py          # /settings menu + callbacks + custom-size FSM
+│   └── generate.py          # prompt / photo-reference → image → reply
 ├── middlewares/
-│   ├── access.py        # whitelist guard
-│   └── db_session.py    # injects the DB connection into handlers
+│   ├── access.py            # whitelist guard (messages + callbacks)
+│   └── db_session.py        # injects the DB connection into handlers
 ├── services/
-│   └── openai_image.py  # thin async wrapper over the OpenAI Images API
+│   ├── openai_image.py      # async wrapper over images.generate + images.edit
+│   └── image_processing.py  # Pillow: crop-to-ratio / fit-to-size / to-png
 └── db/
-    ├── database.py      # connection + migration runner (WAL, FK on)
-    ├── repository.py    # users + generation-history queries
-    └── migrations/      # versioned .sql files, applied once and tracked
-tests/                   # pytest unit tests
+    ├── database.py          # connection + migration runner (WAL, FK on)
+    ├── repository.py        # users, history and per-user settings
+    └── migrations/          # versioned .sql files, applied once and tracked
+tests/                       # pytest unit tests
 ```
 
 ---
@@ -143,10 +170,11 @@ You need two things to run it:
 | `BOT_TOKEN`       | Telegram bot token from [@BotFather](https://t.me/BotFather)        | — (required)       |
 | `OPENAI_API_KEY`  | Key from platform.openai.com                                        | — (required)       |
 | `OWNER_IDS`       | Allowed Telegram IDs (from [@userinfobot](https://t.me/userinfobot)), comma-separated | empty = open to everyone |
-| `OPENAI_MODEL`    | `gpt-image-2` / `gpt-image-1.5` / `gpt-image-1` / `gpt-image-1-mini` | `gpt-image-2`      |
-| `IMAGE_SIZE`      | `1024x1024` / `1024x1536` / `1536x1024`                              | `1024x1024`        |
-| `IMAGE_QUALITY`   | `low` / `medium` / `high`                                            | `high`             |
+| `OPENAI_MODEL`    | Default model for new users (everyone can change it in `/settings`) | `gpt-image-2`      |
 | `DB_PATH`         | Path to the SQLite file                                              | `data/imagebot.db` |
+
+> Format, quality, model and reference fidelity are **per-user** and live in the database —
+> changed at runtime through the `/settings` menu, not in `.env`.
 
 ---
 

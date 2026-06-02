@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from aiogram import BaseMiddleware
-from aiogram.types import Message, TelegramObject, User
+from aiogram.types import CallbackQuery, Message, TelegramObject, User
 
 logger = logging.getLogger(__name__)
 
@@ -35,5 +35,7 @@ class AccessMiddleware(BaseMiddleware):
                 logger.info("Доступ запрещён: %s", user.id if user else "unknown")
                 if isinstance(event, Message):
                     await event.answer("⛔ Доступ ограничён.")
+                elif isinstance(event, CallbackQuery):
+                    await event.answer("⛔ Доступ ограничён.", show_alert=True)
                 return None
         return await handler(event, data)

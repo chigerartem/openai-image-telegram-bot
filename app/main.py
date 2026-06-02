@@ -8,6 +8,8 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import BotCommand
 
 from app.config import load_config
 from app.db.database import Database
@@ -31,30 +33,33 @@ async def main() -> None:
 
     image_service = OpenAIImageService(
         api_key=config.openai_api_key,
-        model=config.openai_model,
-        size=config.image_size,
-        quality=config.image_quality,
+        default_model=config.openai_model,
     )
 
     bot = Bot(
         config.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
-    dp = Dispatcher()
+    dp = Dispatcher(storage=MemoryStorage())
     dp.update.middleware(DbSessionMiddleware(db))
-    dp.message.middleware(AccessMiddleware(config.owner_ids))
+    dp.update.middleware(AccessMiddleware(config.owner_ids))
     dp.include_router(router)
 
     logger.info(
-        "Старт бота | model=%s size=%s quality=%s | owners=%s",
+        "Старт бота | default_model=%s | owners=%s",
         config.openai_model,
-        config.image_size,
-        config.image_quality,
         ", ".join(map(str, sorted(config.owner_ids))) or "ВСЕ",
     )
 
     try:
         await bot.delete_webhook(drop_pending_updates=True)
+        await bot.set_my_commands(
+            [
+                BotCommand(command="start", description="Приветствие"),
+                BotCommand(command="settings", description="Формат, качество, модель, референс"),
+                BotCommand(command="help", description="Справка"),
+            ]
+        )
         await dp.start_polling(bot, image_service=image_service)
     finally:
         await image_service.close()

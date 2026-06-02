@@ -1,4 +1,11 @@
-"""Сервис генерации изображений через OpenAI Images API."""
+"""Сервис генерации изображений через OpenAI Images API.
+
+Поддерживает два режима:
+  - generate(): текст → изображение;
+  - edit():     текст + референс-картинка(и) → изображение.
+Параметры (модель, размер, качество) передаются на каждый запрос, чтобы у каждого
+пользователя могли быть свои настройки.
+"""
 
 from __future__ import annotations
 
@@ -15,48 +22,70 @@ class ImageGenerationError(Exception):
 
 
 class OpenAIImageService:
-    """Тонкая обёртка над AsyncOpenAI: промпт → PNG-байты."""
+    """Тонкая обёртка над AsyncOpenAI: промпт (+ референс) → PNG-байты."""
 
-    def __init__(self, api_key: str, model: str, size: str, quality: str) -> None:
+    def __init__(self, api_key: str, default_model: str) -> None:
         self._client = AsyncOpenAI(api_key=api_key)
-        self._model = model
-        self._size = size
-        self._quality = quality
+        self._default_model = default_model
 
     @property
-    def model(self) -> str:
-        return self._model
+    def default_model(self) -> str:
+        return self._default_model
 
-    @property
-    def size(self) -> str:
-        return self._size
-
-    @property
-    def quality(self) -> str:
-        return self._quality
-
-    async def generate(self, prompt: str) -> bytes:
-        """Генерирует одно изображение и возвращает его как PNG-байты."""
+    async def generate(self, prompt: str, *, model: str, size: str, quality: str) -> bytes:
+        """Текст → одно изображение (PNG-байты)."""
         try:
             result = await self._client.images.generate(
-                model=self._model,
+                model=model,
                 prompt=prompt,
-                size=self._size,
-                quality=self._quality,
+                size=size,
+                quality=quality,
                 n=1,
             )
         except OpenAIError as exc:
-            logger.warning("OpenAI image generation failed: %s", exc)
+            logger.warning("OpenAI image generate failed: %s", exc)
             raise ImageGenerationError(_human_error(exc)) from exc
 
-        if not result.data or not result.data[0].b64_json:
-            raise ImageGenerationError("OpenAI вернул пустой ответ")
+        return _extract_png(result)
 
-        # Модели gpt-image-* всегда отдают изображение в base64, не URL.
-        return base64.b64decode(result.data[0].b64_json)
+    async def edit(
+        self,
+        prompt: str,
+        images: list[bytes],
+        *,
+        model: str,
+        size: str,
+        quality: str,
+        input_fidelity: str,
+    ) -> bytes:
+        """Текст + референс(ы) → одно изображение (PNG-байты)."""
+        files = [("reference.png", data, "image/png") for data in images]
+        try:
+            result = await self._client.images.edit(
+                model=model,
+                prompt=prompt,
+                image=files if len(files) > 1 else files[0],
+                size=size,
+                quality=quality,
+                input_fidelity=input_fidelity,
+                n=1,
+            )
+        except OpenAIError as exc:
+            logger.warning("OpenAI image edit failed: %s", exc)
+            raise ImageGenerationError(_human_error(exc)) from exc
+
+        return _extract_png(result)
 
     async def close(self) -> None:
         await self._client.close()
+
+
+def _extract_png(result: object) -> bytes:
+    """Достаёт PNG-байты из ответа API (модели gpt-image-* отдают base64, не URL)."""
+    data = getattr(result, "data", None)
+    if not data or not getattr(data[0], "b64_json", None):
+        raise ImageGenerationError("OpenAI вернул пустой ответ")
+    return base64.b64decode(data[0].b64_json)
 
 
 def _human_error(exc: OpenAIError) -> str:
@@ -70,6 +99,6 @@ def _human_error(exc: OpenAIError) -> str:
     if any(k in low for k in ("verify", "verification", "must be verified")):
         return (
             "у аккаунта нет доступа к этой модели — нужна верификация организации "
-            "OpenAI либо смени OPENAI_MODEL в .env на gpt-image-1-mini"
+            "OpenAI либо выбери модель gpt-image-1-mini в /settings"
         )
     return f"ошибка OpenAI: {text}"

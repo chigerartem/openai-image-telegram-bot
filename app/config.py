@@ -15,9 +15,7 @@ class Config:
     bot_token: str
     openai_api_key: str
     owner_ids: frozenset[int]
-    openai_model: str
-    image_size: str
-    image_quality: str
+    openai_model: str  # модель по умолчанию для новых пользователей (меняется в /settings)
     db_path: str
 
 
@@ -52,7 +50,5 @@ def load_config() -> Config:
         openai_api_key=openai_api_key,
         owner_ids=_parse_ids(os.getenv("OWNER_IDS", "")),
         openai_model=os.getenv("OPENAI_MODEL", "gpt-image-2").strip(),
-        image_size=os.getenv("IMAGE_SIZE", "1024x1024").strip(),
-        image_quality=os.getenv("IMAGE_QUALITY", "high").strip(),
         db_path=os.getenv("DB_PATH", "data/imagebot.db").strip(),
     )

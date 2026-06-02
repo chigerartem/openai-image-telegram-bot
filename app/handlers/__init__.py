@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from aiogram import Router
 
-from app.handlers import commands, generate
+from app.handlers import commands, generate, settings
 
 router = Router()
 router.include_router(commands.router)
+router.include_router(settings.router)
 router.include_router(generate.router)
 
 __all__ = ["router"]
