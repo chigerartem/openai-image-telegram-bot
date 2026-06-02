@@ -1,0 +1,18 @@
+[project]
+name = "openai-image-telegram-bot"
+version = "1.0.0"
+description = "Telegram bot that generates images from text prompts via the OpenAI Images API."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { file = "LICENSE" }
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# pyflakes, pycodestyle, isort, pyupgrade, flake8-bugbear
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
